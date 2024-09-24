@@ -15,8 +15,8 @@ typedef struct Register
 
 typedef struct PrimaryKeyOnFile
 {
-    char id_aluno[4];
-    char sigla_disc[4];
+    char id_aluno[3];
+    char sigla_disc[3];
     int address_number;
 
 } PrimaryKeyOnFile;
@@ -27,8 +27,6 @@ typedef struct PrimaryKeyOnSearch
     char sigla_disc[4];
 
 } PrimaryKeyOnSearch;
-
-// Function: readInsertRegister - Read all the register that'll be inserted;
 
 Register *readInsertRegister()
 {
@@ -50,8 +48,6 @@ Register *readInsertRegister()
     return NULL;
 }
 
-// Function: readSearchPrimaryKey - Read all the keys that'll be searched;
-
 PrimaryKeyOnSearch *readSearchPrimaryKey()
 {
     FILE *file = fopen("busca_p.bin", "r+b");
@@ -72,29 +68,62 @@ PrimaryKeyOnSearch *readSearchPrimaryKey()
     return NULL;
 }
 
-// Function: readFilePrimaryKey - Read all the keys in memory
-
-PrimaryKeyOnFile *readFilePrimaryKey(int *numKeys)
+PrimaryKeyOnFile *readFilePrimaryKey()
 {
-    FILE *file = fopen("primary_index.bin", "r+b");
+    FILE *log_file = startsLogFile();
+
+    int correctEnd, numKeys;
+    fread(&correctEnd, sizeof(int), 1, log_file);
 
     PrimaryKeyOnFile *keys = (PrimaryKeyOnFile *)malloc(100 * sizeof(PrimaryKeyOnFile));
 
-    if (keys != NULL)
+    if (keys == NULL)
     {
-        *numKeys = (keys, sizeof(struct PrimaryKeyOnFile), 100, file);
-        fclose(file);
-
-        return keys;
+        printf("Erro na alocação (1)\n");
+        fclose(log_file);
+        return NULL;
     }
 
-    printf("Falha na alocação de memória para o registro de inserção\n");
+    if (correctEnd == 1)
+    {
+        FILE *file = fopen("primary_index.bin", "r+b");
 
-    fclose(file);
-    return NULL;
+        numKeys = fread(keys, sizeof(struct PrimaryKeyOnFile), 100, file);
+
+        fclose(file);
+    }
+    else
+    {
+
+        FILE *data_file = iniciaArquivo();
+        fseek(data_file, sizeof(bool), SEEK_SET);
+
+        int size, address, i = 0;
+        address = ftell(data_file);
+
+        while (fread(&size, sizeof(int), 1, data_file) == 1)
+        {
+
+            fread(&keys[i], 6, 1, data_file);
+            keys[i].address_number = address;
+
+            int prox = size - 6;
+            fseek(data_file, prox, SEEK_CUR);
+
+            address = ftell(data_file);
+            i++;
+        }
+
+        fclose(data_file);
+        numKeys = i;
+    }
+
+    fseek(log_file, 8, SEEK_SET);
+    fwrite(&numKeys, sizeof(int), 1, log_file);
+
+    fclose(log_file);
+    return keys;
 }
-
-// Function: startsPrimaryIndexFile - Open or Create the primary_index_file;
 
 FILE *startsPrimaryIndexFile()
 {
@@ -119,8 +148,6 @@ FILE *startsPrimaryIndexFile()
     return file;
 }
 
-// Function: startsLogFile - Open or Create the log_file;
-
 FILE *startsLogFile()
 {
     FILE *file = fopen("log_file.bin", "r+b");
@@ -134,6 +161,7 @@ FILE *startsLogFile()
         {
             int index = -1;
 
+            fwrite(&index, sizeof(int), 1, file);
             fwrite(&index, sizeof(int), 1, file);
             fwrite(&index, sizeof(int), 1, file);
             fwrite(&index, sizeof(int), 1, file);
@@ -151,8 +179,6 @@ FILE *startsLogFile()
 
     return file;
 }
-
-// Function: iniciaArquivo - Open or Create the dados_file
 
 FILE *iniciaArquivo()
 {
@@ -183,8 +209,6 @@ FILE *iniciaArquivo()
     return file;
 }
 
-// Function: calcula_tamanho - Returns the register size
-
 int calcula_tamanho(Register *registro)
 {
 
@@ -201,29 +225,53 @@ int calcula_tamanho(Register *registro)
     return tam;
 }
 
-/*
-    Funtion InsertRegister
+int compareKeys(PrimaryKeyOnFile *a, PrimaryKeyOnFile *b)
+{
+    // Compara os id_aluno
+    int result = strncmp(a->id_aluno, b->id_aluno, 3);
+    if (result == 0)
+    {
+        // Se id_aluno for igual, compara id_disciplina
+        result = strncmp(a->sigla_disc, b->sigla_disc, 3);
+    }
+    return result;
+}
 
-    Parameter: Vector of structs; Number of register that'll be inserted;
-    Return: Nothing;
+int compareKeysWrapper(const void *a, const void *b)
+{
+    return compareKeys((PrimaryKeyOnFile *)a, (PrimaryKeyOnFile *)b);
+}
 
-    Should:
+void writeIndexInFile(PrimaryKeyOnFile *keys)
+{
+    FILE *primary_key = startsPrimaryIndexFile();
+    FILE *log_file = startsLogFile();
 
-    - Open both Log and Data file;
-    - Check the flag on header;
-    - If flag equals true, read the index of the last register inserted;
-    - Write the true flag on data file header;
+    int lastKeyInserted;
 
-*/
+    fseek(log_file, 8, SEEK_SET);
+    fread(&lastKeyInserted, sizeof(int), 1, log_file);
 
-void insertRegister(Register *registro, int numb)
+    ordenaIndex(keys, lastKeyInserted);
+    fwrite(keys, sizeof(PrimaryKeyOnFile), lastKeyInserted, primary_key);
+
+    fclose(primary_key);
+    fclose(log_file);
+}
+
+void ordenaIndex(PrimaryKeyOnFile *keys, int lastKeyInserted)
+{
+    qsort(keys, lastKeyInserted, sizeof(PrimaryKeyOnFile), compareKeysWrapper);
+}
+
+void insertRegister(Register *registro, PrimaryKeyOnFile *keys, int numb)
 {
     FILE *log_file = startsLogFile();
     FILE *dados_file = iniciaArquivo();
 
     int numbKeys;
-
-    PrimaryKeyOnFile *keys = readFilePrimaryKey(&numbKeys);
+    fseek(log_file, 8, SEEK_SET);
+    fread(&numbKeys, sizeof(int), 1, log_file);
 
     int i = 0, tam_reg = 0;
     char delimitador = '#';
@@ -233,6 +281,7 @@ void insertRegister(Register *registro, int numb)
 
     if (operation_flag)
     {
+        fseek(log_file, 4, SEEK_SET);
         fread(&i, sizeof(int), 1, log_file);
         i++;
     }
@@ -242,14 +291,15 @@ void insertRegister(Register *registro, int numb)
         fwrite(&flag, sizeof(bool), 1, dados_file);
     }
 
-    for (int j = i; j < i + numb; j++)
+    for (int j = i; j < i + numb; j++, numbKeys++)
     {
 
         fseek(dados_file, 0, SEEK_END);
         int address_number = ftell(dados_file);
 
-        strcpy(keys[numbKeys].id_aluno, registro[j].id_aluno);
-        strcpy(keys[numbKeys].sigla_disc, registro[j].sigla_disc);
+        strncpy(keys[numbKeys].id_aluno, registro[j].id_aluno, 3);
+        strncpy(keys[numbKeys].sigla_disc, registro[j].sigla_disc, 3);
+
         keys[numbKeys].address_number = address_number;
 
         tam_reg = calcula_tamanho(&registro[j]);
@@ -271,8 +321,107 @@ void insertRegister(Register *registro, int numb)
         fwrite(&j, sizeof(int), 1, log_file);
     }
 
+    fseek(log_file, 8, SEEK_SET);
+    fwrite(&numbKeys, sizeof(int), 1, log_file);
+
     fclose(log_file);
     fclose(dados_file);
+}
 
-    return;
+void buscaChave(PrimaryKeyOnSearch *searchKeys, PrimaryKeyOnFile *keys)
+{
+    FILE *log_file = startsLogFile();
+
+    int lastKeySearched, lastKeyInserted;
+
+    fseek(log_file, 8, SEEK_SET);
+    fread(&lastKeyInserted, sizeof(int), 1, log_file);
+    fread(&lastKeySearched, sizeof(int), 1, log_file);
+
+    lastKeySearched++;
+
+    for (int i = 0; i < lastKeyInserted; i++)
+    {
+        if (strcmp(keys[i].id_aluno, searchKeys[lastKeySearched].id_aluno) == 0)
+        {
+            if (strcmp(keys[i].sigla_disc, searchKeys[lastKeySearched].sigla_disc) == 0)
+            {
+                return imprimeChave(keys[i].address_number);
+            }
+        }
+    }
+}
+
+void imprimeChave(int address)
+{
+    FILE *data_file = iniciaArquivo();
+
+    fseek(data_file, address, SEEK_SET);
+
+    int tamanhoRegistro = 0;
+    fread(&tamanhoRegistro, sizeof(int), 1, data_file);
+
+    char buffer[tamanhoRegistro];
+    fread(buffer, sizeof(buffer), 1, data_file);
+
+    printf("%s\n", buffer);
+
+    fclose(data_file);
+}
+
+int main()
+{
+    int r;
+    bool flag = true;
+
+    Register *registros = readInsertRegister();
+    PrimaryKeyOnFile *keys = readFilePrimaryKey();
+    PrimaryKeyOnSearch *searchKeys = readSearchPrimaryKey();
+
+    if (registros == NULL || searchKeys == NULL || keys == NULL)
+    {
+
+        printf("Erro ao alocar memória para Registros ou searchKeys\n");
+        return 1;
+    }
+
+    printf("Seja bem-vindo ao gerenciador de registros escolares\n");
+
+    while (flag)
+    {
+        printf("(1)Inserção\n(2)Busca por chave primária\n(3)Encerrar programa\nO que deseja fazer:");
+        scanf("%d", &r);
+
+        if (r == 1)
+        {
+            insertRegister(registros, keys, 1);
+        }
+        else if (r == 2)
+        {
+            FILE *log_file = startsLogFile();
+            int lastKeyInserted;
+
+            fseek(log_file, 8, SEEK_SET);
+            fread(&lastKeyInserted, sizeof(int), 1, log_file);
+            fclose(log_file);
+
+            ordenaIndex(keys, lastKeyInserted);
+            buscaChave(searchKeys, keys);
+        }
+        else if (r == 3)
+        {
+            writeIndexInFile(keys);
+            flag = false;
+        }
+        else
+        {
+            printf("Escolha desconhecida, tente novamente!\n");
+        }
+    }
+
+    free(registros);
+    free(keys);
+    free(searchKeys);
+
+    return 0;
 }
