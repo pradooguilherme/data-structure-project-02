@@ -29,72 +29,56 @@ typedef struct PrimaryKeyOnSearch
 
 } PrimaryKeyOnSearch;
 
-Register *readInsertRegister()
+typedef struct SecondaryName
 {
-    FILE *file = fopen("insere.bin", "r+b");
+    char nome[50];
+    int address;
+} SecondaryName;
 
-    Register *registros = (Register *)malloc(100 * sizeof(Register));
-
-    if (registros != NULL)
-    {
-        fread(registros, sizeof(struct Register), 100, file);
-        fclose(file);
-
-        return registros;
-    }
-
-    printf("Falha na alocação de memória para o registro de inserção\n");
-
-    fclose(file);
-    return NULL;
-}
-
-FILE *iniciaArquivo()
+typedef struct SecondaryIDList
 {
+    char id_aluno[4];
+    char sigla_disc[4];
+    int prox_address;
 
-    FILE *file = fopen("dados.bin", "r+b");
+} SecondaryIDList;
+
+typedef struct SecondarySearch
+{
+    char nome_aluno[50];
+} SecondarySearch;
+
+FILE *startsLogFile()
+{
+    FILE *file = fopen("log_file.bin", "r+b");
 
     if (file == NULL)
     {
 
-        file = fopen("dados.bin", "w+b");
+        file = fopen("log_file.bin", "w+b");
 
         if (file != NULL)
         {
+            int index = -1;
 
-            bool operacao_flag = false;
-            fwrite(&operacao_flag, sizeof(bool), 1, file);
+            fwrite(&index, sizeof(int), 1, file);
+            fwrite(&index, sizeof(int), 1, file);
+            fwrite(&index, sizeof(int), 1, file);
+            fwrite(&index, sizeof(int), 1, file);
+            fwrite(&index, sizeof(int), 1, file);
+
             fseek(file, 0, SEEK_SET);
 
             return file;
         }
         else
         {
-            printf("Falha na abertura do arquivo dados.\n");
+            printf("Falha na abertura do arquivo log.\n");
             return NULL;
         }
     }
+
     return file;
-}
-
-PrimaryKeyOnSearch *readSearchPrimaryKey()
-{
-    FILE *file = fopen("busca_p.bin", "r+b");
-
-    PrimaryKeyOnSearch *keys = (PrimaryKeyOnSearch *)malloc(100 * sizeof(PrimaryKeyOnSearch));
-
-    if (keys != NULL)
-    {
-        fread(keys, sizeof(struct PrimaryKeyOnSearch), 100, file);
-        fclose(file);
-
-        return keys;
-    }
-
-    printf("Falha na alocação de memória para o registro de inserção\n");
-
-    fclose(file);
-    return NULL;
 }
 
 FILE *startsSecondaryNameIndexFIle()
@@ -145,36 +129,169 @@ FILE *startsSecondaryKeyIndexFile()
     return file;
 }
 
-FILE *startsLogFile()
+FILE *iniciaArquivo()
 {
-    FILE *file = fopen("log_file.bin", "r+b");
+
+    FILE *file = fopen("dados.bin", "r+b");
 
     if (file == NULL)
     {
 
-        file = fopen("log_file.bin", "w+b");
+        file = fopen("dados.bin", "w+b");
 
         if (file != NULL)
         {
-            int index = -1;
 
-            fwrite(&index, sizeof(int), 1, file);
-            fwrite(&index, sizeof(int), 1, file);
-            fwrite(&index, sizeof(int), 1, file);
-            fwrite(&index, sizeof(int), 1, file);
-
+            bool operacao_flag = false;
+            fwrite(&operacao_flag, sizeof(bool), 1, file);
             fseek(file, 0, SEEK_SET);
 
             return file;
         }
         else
         {
-            printf("Falha na abertura do arquivo log.\n");
+            printf("Falha na abertura do arquivo dados.\n");
             return NULL;
         }
     }
-
     return file;
+}
+
+SecondaryName *readSecondaryIndex()
+{
+    FILE *log_file = startsLogFile();
+
+    int correctEnd, numbSecondaryKeys;
+    fread(&correctEnd, sizeof(int), 1, log_file);
+    fseek(log_file, 16, SEEK_SET);
+    fread(&numbSecondaryKeys, sizeof(int), 1, log_file);
+
+    numbSecondaryKeys++;
+
+    SecondaryName *names = (SecondaryName *)malloc(100 * sizeof(SecondaryName));
+
+    if (names == NULL)
+    {
+        printf("Falha na alocação de memória em readSecondaryName");
+        fclose(log_file);
+        return NULL;
+    }
+
+    if (correctEnd == 1)
+    {
+        FILE *secondaryName = startsSecondaryNameIndexFIle();
+        fread(names, sizeof(SecondaryName), numbSecondaryKeys, secondaryName);
+
+        for (int i = 0; i < numbSecondaryKeys; i++)
+        {
+
+            names[i].address = names[i].address / 10;
+        }
+
+        fclose(secondaryName);
+    }
+    else
+    {
+
+        FILE *secondaryName = startsSecondaryNameIndexFIle();
+        FILE *data_file = iniciaArquivo();
+
+        fread(names, sizeof(SecondaryName), numbSecondaryKeys, secondaryName);
+
+        fseek(data_file, sizeof(bool), SEEK_SET);
+
+        int size = 0, i = 0;
+        char buffer[51];
+        bool flag;
+
+        while (fread(&size, sizeof(int), 1, data_file) == 1)
+        {
+            int pos1 = ftell(data_file);
+            fseek(data_file, 8, SEEK_CUR);
+
+            char a;
+
+            for (int i = 0; i < 51; i++)
+            {
+                fread(&a, sizeof(char), 1, data_file);
+
+                if (a != '#')
+                {
+                    buffer[i] = a;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            buffer[i] = '\0';
+
+            flag = true;
+
+            for (int i = 0; i < numbSecondaryKeys; i++)
+            {
+                if (strcmp(names[i].nome, buffer) == 0)
+                {
+                    flag = false;
+                }
+            }
+
+            if (flag)
+            {
+                strcpy(names[numbSecondaryKeys].nome, buffer);
+                numbSecondaryKeys++;
+            }
+
+            int novapos = size - (ftell(data_file) - pos1);
+            fseek(data_file, novapos, SEEK_CUR);
+        }
+
+        fclose(data_file);
+    }
+
+    fclose(log_file);
+    return names;
+}
+
+Register *readInsertRegister()
+{
+    FILE *file = fopen("insere.bin", "r+b");
+
+    Register *registros = (Register *)malloc(100 * sizeof(Register));
+
+    if (registros != NULL)
+    {
+        fread(registros, sizeof(struct Register), 100, file);
+        fclose(file);
+
+        return registros;
+    }
+
+    printf("Falha na alocação de memória para o registro de inserção\n");
+
+    fclose(file);
+    return NULL;
+}
+
+PrimaryKeyOnSearch *readSearchPrimaryKey()
+{
+    FILE *file = fopen("busca_p.bin", "r+b");
+
+    PrimaryKeyOnSearch *keys = (PrimaryKeyOnSearch *)malloc(100 * sizeof(PrimaryKeyOnSearch));
+
+    if (keys != NULL)
+    {
+        fread(keys, sizeof(struct PrimaryKeyOnSearch), 100, file);
+        fclose(file);
+
+        return keys;
+    }
+
+    printf("Falha na alocação de memória para o registro de inserção\n");
+
+    fclose(file);
+    return NULL;
 }
 
 FILE *startsPrimaryIndexFile()
@@ -328,6 +445,10 @@ void writeIndexInFile(PrimaryKeyOnFile *keys)
     fclose(log_file);
 }
 
+void inserechaveSecundaria(PrimaryKeyOnFile *keys, int numbKeys)
+{
+}
+
 void insertRegister(Register *registro, PrimaryKeyOnFile *keys, int numb)
 {
     FILE *log_file = startsLogFile();
@@ -361,9 +482,15 @@ void insertRegister(Register *registro, PrimaryKeyOnFile *keys, int numb)
         fseek(dados_file, 0, SEEK_END);
         int address_number = ftell(dados_file);
 
+        // Chave primária
+
         strcpy(keys[numbKeys].id_aluno, registro[j].id_aluno);
         strcpy(keys[numbKeys].sigla_disc, registro[j].sigla_disc);
         keys[numbKeys].address_number = address_number;
+
+        // Chave secundária
+
+        // inserechavesecundaria(keys, numbkeys)
 
         tam_reg = calcula_tamanho(&registro[j]);
         fwrite(&tam_reg, sizeof(int), 1, dados_file);
@@ -454,6 +581,7 @@ int main()
     Register *registros = readInsertRegister();
     PrimaryKeyOnFile *keys = readFilePrimaryKey();
     PrimaryKeyOnSearch *searchKeys = readSearchPrimaryKey();
+    SecondaryName *names = readSecondaryName();
 
     if (registros == NULL || searchKeys == NULL || keys == NULL)
     {
