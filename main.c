@@ -97,6 +97,54 @@ PrimaryKeyOnSearch *readSearchPrimaryKey()
     return NULL;
 }
 
+FILE *startsSecondaryNameIndexFIle()
+{
+
+    FILE *file = fopen("name_secondary.bin", "r+b");
+
+    if (file == NULL)
+    {
+
+        file = fopen("name_secondary.bin", "w+b");
+
+        if (file != NULL)
+        {
+            return file;
+        }
+        else
+        {
+            printf("Falha na abertura do arquivo name_secondary.\n");
+            return NULL;
+        }
+    }
+
+    return file;
+}
+
+FILE *startsSecondaryKeyIndexFile()
+{
+
+    FILE *file = fopen("key_secondary.bin", "r+b");
+
+    if (file == NULL)
+    {
+
+        file = fopen("key_secondary.bin", "w+b");
+
+        if (file != NULL)
+        {
+            return file;
+        }
+        else
+        {
+            printf("Falha na abertura do arquivo key_secondary.\n");
+            return NULL;
+        }
+    }
+
+    return file;
+}
+
 FILE *startsLogFile()
 {
     FILE *file = fopen("log_file.bin", "r+b");
@@ -156,7 +204,7 @@ PrimaryKeyOnFile *readFilePrimaryKey()
 {
     FILE *log_file = startsLogFile();
 
-    int correctEnd, numKeys;
+    int correctEnd, numKeys, valor = 1;
     fread(&correctEnd, sizeof(int), 1, log_file);
 
     PrimaryKeyOnFile *keys = (PrimaryKeyOnFile *)malloc(100 * sizeof(PrimaryKeyOnFile));
@@ -187,10 +235,13 @@ PrimaryKeyOnFile *readFilePrimaryKey()
         while (fread(&size, sizeof(int), 1, data_file) == 1)
         {
 
-            fread(&keys[i], 6, 1, data_file);
+            fread(&keys[i].id_aluno, 3, 1, data_file);
+            fseek(data_file, 1, SEEK_CUR);
+            fread(&keys[i].sigla_disc, 3, 1, data_file);
+
             keys[i].address_number = address;
 
-            int prox = size - 6;
+            int prox = size - 7;
             fseek(data_file, prox, SEEK_CUR);
 
             address = ftell(data_file);
@@ -203,6 +254,11 @@ PrimaryKeyOnFile *readFilePrimaryKey()
 
     fseek(log_file, 8, SEEK_SET);
     fwrite(&numKeys, sizeof(int), 1, log_file);
+
+    for (int i = 0; i < numKeys; i++)
+    {
+        printf("Chave %d: %s %s %d\n", i, keys[i].id_aluno, keys[i].sigla_disc, keys[i].address_number);
+    }
 
     fclose(log_file);
     return keys;
@@ -263,7 +319,7 @@ void writeIndexInFile(PrimaryKeyOnFile *keys)
     fread(&lastKeyInserted, sizeof(int), 1, log_file);
 
     ordenaIndex(keys, lastKeyInserted);
-    fwrite(keys, sizeof(PrimaryKeyOnFile), lastKeyInserted + 1, primary_key);
+    fwrite(keys, sizeof(PrimaryKeyOnFile), lastKeyInserted, primary_key);
 
     fseek(log_file, 0, SEEK_SET);
     fwrite(&valor, sizeof(int), 1, log_file);
@@ -281,8 +337,6 @@ void insertRegister(Register *registro, PrimaryKeyOnFile *keys, int numb)
 
     fseek(log_file, 8, SEEK_SET);
     fread(&numbKeys, sizeof(int), 1, log_file);
-
-    printf("%d", numbKeys);
 
     int i = 0, tam_reg = 0;
     char delimitador = '#';
@@ -307,9 +361,9 @@ void insertRegister(Register *registro, PrimaryKeyOnFile *keys, int numb)
         fseek(dados_file, 0, SEEK_END);
         int address_number = ftell(dados_file);
 
-        strcpy(keys[numbKeys + 1].id_aluno, registro[j].id_aluno);
-        strcpy(keys[numbKeys + 1].sigla_disc, registro[j].sigla_disc);
-        keys[numbKeys + 1].address_number = address_number;
+        strcpy(keys[numbKeys].id_aluno, registro[j].id_aluno);
+        strcpy(keys[numbKeys].sigla_disc, registro[j].sigla_disc);
+        keys[numbKeys].address_number = address_number;
 
         tam_reg = calcula_tamanho(&registro[j]);
         fwrite(&tam_reg, sizeof(int), 1, dados_file);
@@ -317,9 +371,9 @@ void insertRegister(Register *registro, PrimaryKeyOnFile *keys, int numb)
         fwrite(&delimitador, sizeof(char), 1, dados_file);
         fwrite(registro[j].sigla_disc, sizeof(char), 3, dados_file);
         fwrite(&delimitador, sizeof(char), 1, dados_file);
-        fwrite(registro[j].nome_aluno, strlen(registro[j].nome_aluno) + 1, 1, dados_file);
+        fwrite(registro[j].nome_aluno, strlen(registro[j].nome_aluno), 1, dados_file);
         fwrite(&delimitador, sizeof(char), 1, dados_file);
-        fwrite(registro[j].nome_disc, strlen(registro[j].nome_disc) + 1, 1, dados_file);
+        fwrite(registro[j].nome_disc, strlen(registro[j].nome_disc), 1, dados_file);
         fwrite(&delimitador, sizeof(char), 1, dados_file);
         fwrite(&registro[j].media, sizeof(float), 1, dados_file);
         fwrite(&delimitador, sizeof(char), 1, dados_file);
@@ -347,10 +401,11 @@ void imprimeChave(int address)
     int tamanhoRegistro = 0;
     fread(&tamanhoRegistro, sizeof(int), 1, data_file);
 
-    char buffer[tamanhoRegistro];
-    fread(buffer, sizeof(buffer), 1, data_file);
+    char buffer[101];
+    fread(buffer, sizeof(char), tamanhoRegistro - 9, data_file);
 
-    printf("%s\n", buffer);
+    buffer[tamanhoRegistro] = '\0';
+    printf("Registro Encontrado: %s\n", buffer);
 
     fclose(data_file);
 }
@@ -362,26 +417,33 @@ void buscaChave(PrimaryKeyOnSearch *searchKeys, PrimaryKeyOnFile *keys)
     int lastKeySearched, lastKeyInserted;
 
     fseek(log_file, 8, SEEK_SET);
+
     fread(&lastKeyInserted, sizeof(int), 1, log_file);
     fread(&lastKeySearched, sizeof(int), 1, log_file);
 
     lastKeySearched++;
 
+    fseek(log_file, 12, SEEK_SET);
+    fwrite(&lastKeySearched, sizeof(int), 1, log_file);
+
     for (int i = 0; i < lastKeyInserted; i++)
     {
+
         if (strcmp(keys[i].id_aluno, searchKeys[lastKeySearched].id_aluno) == 0)
         {
             if (strcmp(keys[i].sigla_disc, searchKeys[lastKeySearched].sigla_disc) == 0)
             {
                 imprimeChave(keys[i].address_number);
 
-                fseek(log_file, 12, SEEK_SET);
-                fwrite(&lastKeySearched, sizeof(int), 1, log_file);
-
+                fclose(log_file);
                 return;
             }
         }
     }
+
+    fclose(log_file);
+    printf("Registro não encontrada!\n");
+    return;
 }
 
 int main()
@@ -432,6 +494,9 @@ int main()
             remove("dados.bin");
             remove("log_file.bin");
             remove("primary_index_file.bin");
+
+            PrimaryKeyOnFile *keys = readFilePrimaryKey();
+            PrimaryKeyOnSearch *searchKeys = readSearchPrimaryKey();
         }
         else
         {
