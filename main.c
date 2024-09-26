@@ -59,13 +59,13 @@ FILE *startsLogFile()
 
         if (file != NULL)
         {
-            int index = -1;
+            int index1 = -1, index2 = 0;
 
-            fwrite(&index, sizeof(int), 1, file);
-            fwrite(&index, sizeof(int), 1, file);
-            fwrite(&index, sizeof(int), 1, file);
-            fwrite(&index, sizeof(int), 1, file);
-            fwrite(&index, sizeof(int), 1, file);
+            fwrite(&index1, sizeof(int), 1, file);
+            fwrite(&index1, sizeof(int), 1, file);
+            fwrite(&index1, sizeof(int), 1, file);
+            fwrite(&index1, sizeof(int), 1, file);
+            fwrite(&index2, sizeof(int), 1, file);
 
             fseek(file, 0, SEEK_SET);
 
@@ -157,101 +157,304 @@ FILE *iniciaArquivo()
     return file;
 }
 
-SecondaryName *readSecondaryIndex()
+FILE *startsPrimaryIndexFile()
+{
+    FILE *file = fopen("primary_index_file.bin", "r+b");
+
+    if (file == NULL)
+    {
+
+        file = fopen("primary_index_file.bin", "w+b");
+
+        if (file != NULL)
+        {
+            return file;
+        }
+        else
+        {
+            printf("Falha na abertura do arquivo log.\n");
+            return NULL;
+        }
+    }
+
+    return file;
+}
+
+int isNameInSecondaryFile(char *nome, int numbOfNames, SecondaryName *nomes)
+{
+    for (int i = 0; i < numbOfNames; i++)
+    {
+        if (strcmp(nome, nomes[i].nome) == 0)
+        {
+
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+PrimaryKeyOnFile *readFilePrimaryKey()
 {
     FILE *log_file = startsLogFile();
 
-    int correctEnd, numbSecondaryKeys;
+    int correctEnd, numKeys, valor = 1;
     fread(&correctEnd, sizeof(int), 1, log_file);
-    fseek(log_file, 16, SEEK_SET);
-    fread(&numbSecondaryKeys, sizeof(int), 1, log_file);
 
-    numbSecondaryKeys++;
+    PrimaryKeyOnFile *keys = (PrimaryKeyOnFile *)malloc(100 * sizeof(PrimaryKeyOnFile));
 
-    SecondaryName *names = (SecondaryName *)malloc(100 * sizeof(SecondaryName));
-
-    if (names == NULL)
+    if (keys == NULL)
     {
-        printf("Falha na alocação de memória em readSecondaryName");
+        printf("Erro na alocação (1)\n");
         fclose(log_file);
         return NULL;
     }
 
     if (correctEnd == 1)
     {
-        FILE *secondaryName = startsSecondaryNameIndexFIle();
-        fread(names, sizeof(SecondaryName), numbSecondaryKeys, secondaryName);
+        FILE *file = startsPrimaryIndexFile();
 
-        for (int i = 0; i < numbSecondaryKeys; i++)
-        {
-
-            names[i].address = names[i].address / 10;
-        }
-
-        fclose(secondaryName);
+        numKeys = fread(keys, sizeof(struct PrimaryKeyOnFile), 100, file);
+        fclose(file);
     }
     else
     {
 
-        FILE *secondaryName = startsSecondaryNameIndexFIle();
         FILE *data_file = iniciaArquivo();
-
-        fread(names, sizeof(SecondaryName), numbSecondaryKeys, secondaryName);
-
         fseek(data_file, sizeof(bool), SEEK_SET);
 
-        int size = 0, i = 0;
-        char buffer[51];
-        bool flag;
+        int size, address, i = 0;
+        address = ftell(data_file);
 
         while (fread(&size, sizeof(int), 1, data_file) == 1)
         {
-            int pos1 = ftell(data_file);
-            fseek(data_file, 8, SEEK_CUR);
 
-            char a;
+            fread(&keys[i].id_aluno, 3, 1, data_file);
+            keys[i].id_aluno[3] = '\0';
 
-            for (int i = 0; i < 51; i++)
+            fseek(data_file, 1, SEEK_CUR);
+
+            fread(&keys[i].sigla_disc, 3, 1, data_file);
+            keys[i].sigla_disc[3] = '\0';
+
+            keys[i].address_number = address;
+
+            int prox = size - 7;
+            fseek(data_file, prox, SEEK_CUR);
+
+            address = ftell(data_file);
+            i++;
+        }
+
+        fclose(data_file);
+        numKeys = i;
+    }
+
+    fseek(log_file, 8, SEEK_SET);
+    fwrite(&numKeys, sizeof(int), 1, log_file);
+
+    for (int i = 0; i < numKeys; i++)
+    {
+        printf("\nChave %d: ID Aluno: %s, Sigla Disciplina: %s, Endereço Número: %d\n",
+               i + 1, keys[i].id_aluno, keys[i].sigla_disc, keys[i].address_number);
+    }
+
+    fclose(log_file);
+    return keys;
+}
+
+char *imprimeChave(int address)
+{
+    FILE *data_file = iniciaArquivo();
+
+    fseek(data_file, address, SEEK_SET);
+
+    int tamanhoRegistro = 0;
+    fread(&tamanhoRegistro, sizeof(int), 1, data_file);
+
+    char *buffer = (char *)malloc((tamanhoRegistro - 9 + 1) * sizeof(char));
+    fread(buffer, sizeof(char), tamanhoRegistro - 9, data_file);
+
+    buffer[tamanhoRegistro - 9] = '\0';
+
+    fclose(data_file);
+    return buffer;
+}
+
+int isAlunoInSecondaryFile(char *nome, SecondaryIDList *list, int numbOfId)
+{
+
+    for (int i = 0; i < numbOfId; i++)
+    {
+        if (strcmp(list[i].id_aluno, nome) == 0 && list[i].prox_address == -1)
+        {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+SecondaryName *createVectorOfSecondaryName()
+{
+    FILE *log_file = startsLogFile();
+
+    int correctEnd, numbOfNames;
+    fread(&correctEnd, sizeof(int), 1, log_file);
+    fseek(log_file, 16, SEEK_SET);
+    fread(&numbOfNames, sizeof(int), 1, log_file);
+
+    SecondaryName *vectorOfSecondaryName = (SecondaryName *)malloc(sizeof(SecondaryName) * 100);
+
+    if (correctEnd == 1 && numbOfNames != 0)
+    {
+        FILE *secondaryIndexName = startsSecondaryNameIndexFIle();
+
+        char buffer[55], a;
+        int address;
+
+        for (int j = 0; j < numbOfNames; j++)
+        {
+            memset(buffer, 0, sizeof(buffer));
+
+            for (int i = 0; i < 55; i++)
             {
-                fread(&a, sizeof(char), 1, data_file);
-
+                fread(&a, sizeof(char), 1, secondaryIndexName);
                 if (a != '#')
                 {
                     buffer[i] = a;
                 }
                 else
                 {
+                    buffer[i] = '\0';
                     break;
                 }
             }
 
-            buffer[i] = '\0';
-
-            flag = true;
-
-            for (int i = 0; i < numbSecondaryKeys; i++)
-            {
-                if (strcmp(names[i].nome, buffer) == 0)
-                {
-                    flag = false;
-                }
-            }
-
-            if (flag)
-            {
-                strcpy(names[numbSecondaryKeys].nome, buffer);
-                numbSecondaryKeys++;
-            }
-
-            int novapos = size - (ftell(data_file) - pos1);
-            fseek(data_file, novapos, SEEK_CUR);
+            fread(&address, sizeof(int), 1, secondaryIndexName);
+            strcpy(vectorOfSecondaryName[j].nome, buffer);
+            vectorOfSecondaryName[j].address = address;
         }
 
-        fclose(data_file);
+        fclose(secondaryIndexName);
+    }
+    else
+    {
+        PrimaryKeyOnFile *keys = readFilePrimaryKey();
+        int numbPrimaryKeys;
+
+        fseek(log_file, 8, SEEK_SET);
+        fread(&numbPrimaryKeys, sizeof(int), 1, log_file);
+
+        printf("Numero de PrimaryKeys: %d\n", numbPrimaryKeys);
+
+        for (int i = 0; i < numbPrimaryKeys; i++)
+        {
+            char *buffer = imprimeChave(keys[i].address_number);
+
+            printf("Esse é o buffer retornado: %s\n", buffer);
+
+            strtok(buffer, "#");
+            strtok(NULL, "#");
+
+            char *nome_aluno = strtok(NULL, "#");
+
+            printf("Esse é o nome após token retornado: %s\n", nome_aluno);
+
+            printf("%d\n", numbOfNames);
+
+            int valor = isNameInSecondaryFile(nome_aluno, numbOfNames, vectorOfSecondaryName);
+            if (valor == 0)
+            {
+                strcpy(vectorOfSecondaryName[numbOfNames].nome, nome_aluno);
+                vectorOfSecondaryName[numbOfNames].address = numbOfNames;
+                numbOfNames++;
+            }
+        }
+    }
+
+    for (int i = 0; i < numbOfNames; i++)
+    {
+        printf("Nome: %s, Endereço: %d\n", vectorOfSecondaryName[i].nome, vectorOfSecondaryName[i].address);
     }
 
     fclose(log_file);
-    return names;
+    return vectorOfSecondaryName;
+}
+
+SecondaryIDList *createVectorOfIDList()
+{
+
+    FILE *log_file = startsLogFile();
+
+    int correctEnd, numbOfId;
+
+    fread(&correctEnd, sizeof(int), 1, log_file);
+    fseek(log_file, 8, SEEK_SET);
+    fread(&numbOfId, sizeof(int), 1, log_file);
+
+    SecondaryIDList *list = (SecondaryIDList *)malloc(sizeof(SecondaryIDList) * numbOfId);
+
+    if (correctEnd == 1)
+    {
+        FILE *secondaryIndexID = startsSecondaryKeyIndexFile();
+
+        for (int i = 0; i < numbOfId; i++)
+        {
+
+            char id_aluno[4];
+            char id_disciplina[4];
+            int address;
+
+            fread(id_aluno, sizeof(char), 3, secondaryIndexID);
+            fread(id_disciplina, sizeof(char), 3, secondaryIndexID);
+            fread(&address, sizeof(int), 1, secondaryIndexID);
+
+            id_aluno[3] = '\0';
+            id_disciplina[3] = '\0';
+
+            if (address != -1)
+            {
+                address = address / 10;
+            }
+
+            strcpy(list[i].id_aluno, id_aluno);
+            strcpy(list[i].sigla_disc, id_disciplina);
+            list[i].prox_address = address;
+        }
+
+        fclose(secondaryIndexID);
+    }
+    else
+    {
+        PrimaryKeyOnFile *keys = readFilePrimaryKey();
+
+        for (int i = 0; i < numbOfId; i++)
+        {
+            strcpy(list[i].id_aluno, keys[i].id_aluno);
+            strcpy(list[i].sigla_disc, keys[i].sigla_disc);
+            list[i].prox_address = -1;
+
+            int valor = isAlunoInSecondaryFile(list[i].id_aluno, list, i);
+
+            if (valor != -1)
+            {
+                list[valor].prox_address = i;
+            }
+        }
+    }
+
+    /*for (int i = 0; i < numbOfId; i++)
+    {
+        printf("ID Aluno: %s\n", list[i].id_aluno);
+        printf("Sigla Disciplina: %s\n", list[i].sigla_disc);
+        printf("Próximo Endereço: %d\n", list[i].prox_address);
+        printf("-------------------------\n");
+    }
+    */
+
+    fclose(log_file);
+    return list;
 }
 
 Register *readInsertRegister()
@@ -292,93 +495,6 @@ PrimaryKeyOnSearch *readSearchPrimaryKey()
 
     fclose(file);
     return NULL;
-}
-
-FILE *startsPrimaryIndexFile()
-{
-    FILE *file = fopen("primary_index_file.bin", "r+b");
-
-    if (file == NULL)
-    {
-
-        file = fopen("primary_index_file.bin", "w+b");
-
-        if (file != NULL)
-        {
-            return file;
-        }
-        else
-        {
-            printf("Falha na abertura do arquivo log.\n");
-            return NULL;
-        }
-    }
-
-    return file;
-}
-
-PrimaryKeyOnFile *readFilePrimaryKey()
-{
-    FILE *log_file = startsLogFile();
-
-    int correctEnd, numKeys, valor = 1;
-    fread(&correctEnd, sizeof(int), 1, log_file);
-
-    PrimaryKeyOnFile *keys = (PrimaryKeyOnFile *)malloc(100 * sizeof(PrimaryKeyOnFile));
-
-    if (keys == NULL)
-    {
-        printf("Erro na alocação (1)\n");
-        fclose(log_file);
-        return NULL;
-    }
-
-    if (correctEnd == 1)
-    {
-        FILE *file = startsPrimaryIndexFile();
-
-        numKeys = fread(keys, sizeof(struct PrimaryKeyOnFile), 100, file);
-        fclose(file);
-    }
-    else
-    {
-
-        FILE *data_file = iniciaArquivo();
-        fseek(data_file, sizeof(bool), SEEK_SET);
-
-        int size, address, i = 0;
-        address = ftell(data_file);
-
-        while (fread(&size, sizeof(int), 1, data_file) == 1)
-        {
-
-            fread(&keys[i].id_aluno, 3, 1, data_file);
-            fseek(data_file, 1, SEEK_CUR);
-            fread(&keys[i].sigla_disc, 3, 1, data_file);
-
-            keys[i].address_number = address;
-
-            int prox = size - 7;
-            fseek(data_file, prox, SEEK_CUR);
-
-            address = ftell(data_file);
-            i++;
-        }
-
-        fclose(data_file);
-        numKeys = i;
-    }
-
-    fseek(log_file, 8, SEEK_SET);
-    fwrite(&numKeys, sizeof(int), 1, log_file);
-
-    for (int i = 0; i < numKeys; i++)
-    {
-        printf("Chave %d: %s %s %d\n", i, keys[i].id_aluno, keys[i].sigla_disc, keys[i].address_number);
-    }
-
-    fclose(log_file);
-    return keys;
 }
 
 int calcula_tamanho(Register *registro)
@@ -519,25 +635,7 @@ void insertRegister(Register *registro, PrimaryKeyOnFile *keys, int numb)
     fclose(dados_file);
 }
 
-void imprimeChave(int address)
-{
-    FILE *data_file = iniciaArquivo();
-
-    fseek(data_file, address, SEEK_SET);
-
-    int tamanhoRegistro = 0;
-    fread(&tamanhoRegistro, sizeof(int), 1, data_file);
-
-    char buffer[101];
-    fread(buffer, sizeof(char), tamanhoRegistro - 9, data_file);
-
-    buffer[tamanhoRegistro] = '\0';
-    printf("Registro Encontrado: %s\n", buffer);
-
-    fclose(data_file);
-}
-
-void buscaChave(PrimaryKeyOnSearch *searchKeys, PrimaryKeyOnFile *keys)
+char *buscaChave(PrimaryKeyOnSearch *searchKeys, PrimaryKeyOnFile *keys)
 {
     FILE *log_file = startsLogFile();
 
@@ -560,17 +658,17 @@ void buscaChave(PrimaryKeyOnSearch *searchKeys, PrimaryKeyOnFile *keys)
         {
             if (strcmp(keys[i].sigla_disc, searchKeys[lastKeySearched].sigla_disc) == 0)
             {
-                imprimeChave(keys[i].address_number);
-
                 fclose(log_file);
-                return;
+                char *buffer = imprimeChave(keys[i].address_number);
+
+                printf("Registro Encontrado: %s\n", buffer);
             }
         }
     }
 
     fclose(log_file);
     printf("Registro não encontrada!\n");
-    return;
+    return NULL;
 }
 
 int main()
@@ -581,7 +679,9 @@ int main()
     Register *registros = readInsertRegister();
     PrimaryKeyOnFile *keys = readFilePrimaryKey();
     PrimaryKeyOnSearch *searchKeys = readSearchPrimaryKey();
-    SecondaryName *names = readSecondaryName();
+
+    SecondaryName *names = createVectorOfSecondaryName();
+    SecondaryIDList *list = createVectorOfIDList();
 
     if (registros == NULL || searchKeys == NULL || keys == NULL)
     {
