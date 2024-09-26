@@ -66,6 +66,7 @@ FILE *startsLogFile()
             fwrite(&index1, sizeof(int), 1, file);
             fwrite(&index1, sizeof(int), 1, file);
             fwrite(&index2, sizeof(int), 1, file);
+            fwrite(&index1, sizeof(int), 1, file);
 
             fseek(file, 0, SEEK_SET);
 
@@ -186,7 +187,6 @@ int isNameInSecondaryFile(char *nome, int numbOfNames, SecondaryName *nomes)
     {
         if (strcmp(nome, nomes[i].nome) == 0)
         {
-
             return -1;
         }
     }
@@ -253,11 +253,11 @@ PrimaryKeyOnFile *readFilePrimaryKey()
     fseek(log_file, 8, SEEK_SET);
     fwrite(&numKeys, sizeof(int), 1, log_file);
 
-    for (int i = 0; i < numKeys; i++)
+    /*for (int i = 0; i < numKeys; i++)
     {
-        printf("\nChave %d: ID Aluno: %s, Sigla Disciplina: %s, Endereço Número: %d\n",
+        printf("Chave %d: ID Aluno: %s, Sigla Disciplina: %s, Endereço Número: %d\n",
                i + 1, keys[i].id_aluno, keys[i].sigla_disc, keys[i].address_number);
-    }
+    }*/
 
     fclose(log_file);
     return keys;
@@ -293,6 +293,27 @@ int isAlunoInSecondaryFile(char *nome, SecondaryIDList *list, int numbOfId)
     }
 
     return -1;
+}
+
+SecondarySearch *readSearch()
+{
+    FILE *file = fopen("busca_s.bin", "r+b");
+
+    SecondarySearch *searchName = (SecondarySearch *)malloc(100 * sizeof(SecondarySearch));
+
+    if (searchName != NULL)
+    {
+
+        fread(searchName, sizeof(SecondarySearch), 100, file);
+        fclose(file);
+
+        return searchName;
+    }
+
+    printf("Falha na alocação de memória para as chaves de busca secundária\n");
+
+    fclose(file);
+    return NULL;
 }
 
 SecondaryName *createVectorOfSecondaryName()
@@ -341,41 +362,38 @@ SecondaryName *createVectorOfSecondaryName()
     else
     {
         PrimaryKeyOnFile *keys = readFilePrimaryKey();
-        int numbPrimaryKeys;
+        int numbPrimaryKeys, contador = 0;
 
         fseek(log_file, 8, SEEK_SET);
         fread(&numbPrimaryKeys, sizeof(int), 1, log_file);
 
-        printf("Numero de PrimaryKeys: %d\n", numbPrimaryKeys);
+        numbOfNames = 0;
 
         for (int i = 0; i < numbPrimaryKeys; i++)
         {
             char *buffer = imprimeChave(keys[i].address_number);
-
-            printf("Esse é o buffer retornado: %s\n", buffer);
 
             strtok(buffer, "#");
             strtok(NULL, "#");
 
             char *nome_aluno = strtok(NULL, "#");
 
-            printf("Esse é o nome após token retornado: %s\n", nome_aluno);
-
-            printf("%d\n", numbOfNames);
-
             int valor = isNameInSecondaryFile(nome_aluno, numbOfNames, vectorOfSecondaryName);
+
             if (valor == 0)
             {
                 strcpy(vectorOfSecondaryName[numbOfNames].nome, nome_aluno);
-                vectorOfSecondaryName[numbOfNames].address = numbOfNames;
+                vectorOfSecondaryName[numbOfNames].address = numbOfNames + contador;
                 numbOfNames++;
             }
+            else
+            {
+                contador++;
+            }
         }
-    }
 
-    for (int i = 0; i < numbOfNames; i++)
-    {
-        printf("Nome: %s, Endereço: %d\n", vectorOfSecondaryName[i].nome, vectorOfSecondaryName[i].address);
+        fseek(log_file, 16, SEEK_SET);
+        fwrite(&numbOfNames, sizeof(int), 1, log_file);
     }
 
     fclose(log_file);
@@ -444,7 +462,9 @@ SecondaryIDList *createVectorOfIDList()
         }
     }
 
-    /*for (int i = 0; i < numbOfId; i++)
+    /*printf("\nNumbOfId: %d\n", numbOfId);
+
+    for (int i = 0; i < numbOfId; i++)
     {
         printf("ID Aluno: %s\n", list[i].id_aluno);
         printf("Sigla Disciplina: %s\n", list[i].sigla_disc);
@@ -515,11 +535,9 @@ int calcula_tamanho(Register *registro)
 
 int compareKeys(PrimaryKeyOnFile *a, PrimaryKeyOnFile *b)
 {
-    // Compara os id_aluno
     int result = strncmp(a->id_aluno, b->id_aluno, 3);
     if (result == 0)
     {
-        // Se id_aluno for igual, compara id_disciplina
         result = strncmp(a->sigla_disc, b->sigla_disc, 3);
     }
     return result;
@@ -530,39 +548,103 @@ int compareKeysWrapper(const void *a, const void *b)
     return compareKeys((PrimaryKeyOnFile *)a, (PrimaryKeyOnFile *)b);
 }
 
-void ordenaIndex(PrimaryKeyOnFile *keys, int lastKeyInserted)
+void ordenaPrimaryIndex(PrimaryKeyOnFile *keys, int lastKeyInserted)
 {
     qsort(keys, lastKeyInserted, sizeof(PrimaryKeyOnFile), compareKeysWrapper);
 }
 
-void writeIndexInFile(PrimaryKeyOnFile *keys)
+int compareByName(const void *a, const void *b)
+{
+    SecondaryName *nameA = (SecondaryName *)a;
+    SecondaryName *nameB = (SecondaryName *)b;
+
+    return strcmp(nameA->nome, nameB->nome);
+}
+
+void ordenaSecondaryNameIndex(SecondaryName *names, int numbOfNames)
+{
+    qsort(names, numbOfNames, sizeof(SecondaryName), compareByName);
+}
+
+void writePrimaryIndexInFile(PrimaryKeyOnFile *keys)
 {
     if (keys == NULL)
     {
-        printf("eita bixo");
         return;
     }
 
     FILE *primary_key = startsPrimaryIndexFile();
     FILE *log_file = startsLogFile();
 
-    int lastKeyInserted, valor = 1;
+    int lastKeyInserted;
 
     fseek(log_file, 8, SEEK_SET);
     fread(&lastKeyInserted, sizeof(int), 1, log_file);
 
-    ordenaIndex(keys, lastKeyInserted);
+    ordenaPrimaryIndex(keys, lastKeyInserted);
     fwrite(keys, sizeof(PrimaryKeyOnFile), lastKeyInserted, primary_key);
-
-    fseek(log_file, 0, SEEK_SET);
-    fwrite(&valor, sizeof(int), 1, log_file);
 
     fclose(primary_key);
     fclose(log_file);
 }
 
-void inserechaveSecundaria(PrimaryKeyOnFile *keys, int numbKeys)
+void writeSecondaryIndexInFile(SecondaryName *names)
 {
+    FILE *secondaryNameFIle = startsSecondaryNameIndexFIle();
+    FILE *log_file = startsLogFile();
+
+    int numbOfNames;
+    char delimitador = '#';
+
+    fseek(log_file, 16, SEEK_SET);
+    fread(&numbOfNames, sizeof(int), 1, log_file);
+
+    ordenaSecondaryNameIndex(names, numbOfNames);
+
+    for (int i = 0; i < numbOfNames; i++)
+    {
+        fwrite(names[i].nome, sizeof(char), strlen(names[i].nome), secondaryNameFIle);
+        fwrite(&delimitador, sizeof(char), 1, secondaryNameFIle);
+        fwrite(&names[i].address, sizeof(int), 1, secondaryNameFIle);
+    }
+
+    fclose(secondaryNameFIle);
+    fclose(log_file);
+}
+
+void writeSecondaryIDIndexInFile(SecondaryIDList *list)
+{
+
+    FILE *secondaryIDFile = startsSecondaryKeyIndexFile();
+    FILE *log_file = startsLogFile();
+
+    int numbOfKeys;
+
+    fseek(log_file, 8, SEEK_SET);
+    fread(&numbOfKeys, sizeof(int), 1, log_file);
+    int valor = 1;
+
+    for (int i = 0; i < numbOfKeys; i++)
+    {
+
+        fwrite(list[i].id_aluno, sizeof(char), 3, secondaryIDFile);
+        fwrite(list[i].sigla_disc, sizeof(char), 3, secondaryIDFile);
+
+        int valor = list[i].prox_address;
+
+        if (valor != -1)
+        {
+            valor = valor * 10;
+        }
+
+        fwrite(&valor, sizeof(int), 1, secondaryIDFile);
+    }
+
+    fseek(log_file, 0, SEEK_SET);
+    fwrite(&valor, sizeof(int), 1, log_file);
+
+    fclose(secondaryIDFile);
+    fclose(log_file);
 }
 
 void insertRegister(Register *registro, PrimaryKeyOnFile *keys, int numb)
@@ -570,7 +652,7 @@ void insertRegister(Register *registro, PrimaryKeyOnFile *keys, int numb)
     FILE *log_file = startsLogFile();
     FILE *dados_file = iniciaArquivo();
 
-    int numbKeys, valor = -1;
+    int numbKeys, valor = -1, numbName;
 
     fseek(log_file, 8, SEEK_SET);
     fread(&numbKeys, sizeof(int), 1, log_file);
@@ -604,10 +686,6 @@ void insertRegister(Register *registro, PrimaryKeyOnFile *keys, int numb)
         strcpy(keys[numbKeys].sigla_disc, registro[j].sigla_disc);
         keys[numbKeys].address_number = address_number;
 
-        // Chave secundária
-
-        // inserechavesecundaria(keys, numbkeys)
-
         tam_reg = calcula_tamanho(&registro[j]);
         fwrite(&tam_reg, sizeof(int), 1, dados_file);
         fwrite(registro[j].id_aluno, sizeof(char), 3, dados_file);
@@ -628,47 +706,102 @@ void insertRegister(Register *registro, PrimaryKeyOnFile *keys, int numb)
 
     fseek(log_file, 0, SEEK_SET);
     fwrite(&valor, sizeof(int), 1, log_file);
-    fseek(log_file, 4, SEEK_CUR);
+    fseek(log_file, 8, SEEK_SET);
     fwrite(&numbKeys, sizeof(int), 1, log_file);
 
     fclose(log_file);
     fclose(dados_file);
 }
 
-char *buscaChave(PrimaryKeyOnSearch *searchKeys, PrimaryKeyOnFile *keys)
+void buscaChave(PrimaryKeyOnSearch *searchKeys, PrimaryKeyOnFile *keys)
 {
     FILE *log_file = startsLogFile();
 
-    int lastKeySearched, lastKeyInserted;
+    int lastKeyInserted;
 
     fseek(log_file, 8, SEEK_SET);
-
     fread(&lastKeyInserted, sizeof(int), 1, log_file);
-    fread(&lastKeySearched, sizeof(int), 1, log_file);
-
-    lastKeySearched++;
-
-    fseek(log_file, 12, SEEK_SET);
-    fwrite(&lastKeySearched, sizeof(int), 1, log_file);
 
     for (int i = 0; i < lastKeyInserted; i++)
     {
 
-        if (strcmp(keys[i].id_aluno, searchKeys[lastKeySearched].id_aluno) == 0)
+        if (strcmp(keys[i].id_aluno, searchKeys->id_aluno) == 0)
         {
-            if (strcmp(keys[i].sigla_disc, searchKeys[lastKeySearched].sigla_disc) == 0)
+            if (strcmp(keys[i].sigla_disc, searchKeys->sigla_disc) == 0)
             {
                 fclose(log_file);
                 char *buffer = imprimeChave(keys[i].address_number);
 
                 printf("Registro Encontrado: %s\n", buffer);
+
+                return;
             }
         }
     }
 
     fclose(log_file);
     printf("Registro não encontrada!\n");
-    return NULL;
+}
+
+void buscaChavePrimaria(PrimaryKeyOnSearch *searchKeys, PrimaryKeyOnFile *keys)
+{
+    FILE *log_file = startsLogFile();
+
+    int lastKeySearched;
+
+    fseek(log_file, 12, SEEK_SET);
+    fread(&lastKeySearched, sizeof(int), 1, log_file);
+    lastKeySearched++;
+
+    fseek(log_file, 12, SEEK_SET);
+    fwrite(&lastKeySearched, sizeof(int), 1, log_file);
+
+    fclose(log_file);
+
+    buscaChave(&searchKeys[lastKeySearched], keys);
+}
+
+void *buscaChaveSecundaria(SecondarySearch *searchNames, SecondaryName *names, SecondaryIDList *list, PrimaryKeyOnFile *keys)
+{
+
+    FILE *log_file = startsLogFile();
+
+    int lastKeySearched, numbNames;
+
+    fseek(log_file, 16, SEEK_SET);
+
+    fread(&numbNames, sizeof(int), 1, log_file);
+    fread(&lastKeySearched, sizeof(int), 1, log_file);
+
+    lastKeySearched++;
+
+    fseek(log_file, 20, SEEK_SET);
+    fwrite(&lastKeySearched, sizeof(int), 1, log_file);
+
+    fclose(log_file);
+
+    for (int i = 0; i < numbNames; i++)
+    {
+
+        if (strcmp(searchNames[lastKeySearched].nome_aluno, names[i].nome) == 0)
+        {
+
+            int j = names[i].address;
+
+            while (j != -1)
+            {
+
+                PrimaryKeyOnSearch *novaBusca = (PrimaryKeyOnSearch *)malloc(sizeof(PrimaryKeyOnSearch));
+
+                strcpy(novaBusca->id_aluno, list[j].id_aluno);
+                strcpy(novaBusca->sigla_disc, list[j].sigla_disc);
+
+                buscaChave(novaBusca, keys);
+
+                j = list[j].prox_address;
+            }
+        }
+    }
 }
 
 int main()
@@ -680,8 +813,9 @@ int main()
     PrimaryKeyOnFile *keys = readFilePrimaryKey();
     PrimaryKeyOnSearch *searchKeys = readSearchPrimaryKey();
 
-    SecondaryName *names = createVectorOfSecondaryName();
     SecondaryIDList *list = createVectorOfIDList();
+    SecondaryName *names = createVectorOfSecondaryName();
+    SecondarySearch *nameSearch = readSearch();
 
     if (registros == NULL || searchKeys == NULL || keys == NULL)
     {
@@ -693,12 +827,14 @@ int main()
 
     while (flag)
     {
-        printf("\n(1)Inserção\n(2)Busca por chave primária\n(3)Encerrar programa\n(4)Excluir Arquivos\nO que deseja fazer:");
+        printf("\n(1)Inserção\n(2)Busca por chave primária\n(3)Encerrar programa\n(4)Excluir Arquivos\n(5)Busca por chave secundária\nO que deseja fazer:");
         scanf("%d", &r);
 
         if (r == 1)
         {
             insertRegister(registros, keys, 1);
+            list = createVectorOfIDList();
+            names = createVectorOfSecondaryName();
         }
         else if (r == 2)
         {
@@ -709,12 +845,14 @@ int main()
             fread(&lastKeyInserted, sizeof(int), 1, log_file);
             fclose(log_file);
 
-            ordenaIndex(keys, lastKeyInserted);
-            buscaChave(searchKeys, keys);
+            ordenaPrimaryIndex(keys, lastKeyInserted);
+            buscaChavePrimaria(searchKeys, keys);
         }
         else if (r == 3)
         {
-            writeIndexInFile(keys);
+            writePrimaryIndexInFile(keys);
+            writeSecondaryIndexInFile(names);
+            writeSecondaryIDIndexInFile(list);
             flag = false;
         }
         else if (r == 4)
@@ -722,14 +860,25 @@ int main()
             remove("dados.bin");
             remove("log_file.bin");
             remove("primary_index_file.bin");
+            remove("name_secondary.bin");
+            remove("key_secondary.bin");
 
             PrimaryKeyOnFile *keys = readFilePrimaryKey();
             PrimaryKeyOnSearch *searchKeys = readSearchPrimaryKey();
+            SecondaryIDList *list = createVectorOfIDList();
+            SecondaryName *names = createVectorOfSecondaryName();
         }
-        else
+        else if (r == 5)
         {
-            printf("Escolha desconhecida, tente novamente!\n");
+            buscaChaveSecundaria(nameSearch, names, list, keys);
         }
     }
+
+    free(registros);
+    free(keys);
+    free(searchKeys);
+    free(list);
+    free(names);
+
     return 0;
 }
